@@ -1,0 +1,13 @@
+#directories
+/OLD
+/data
+/histogram
+/particles
+/phase
+/power
+
+#Executables
+*.e
+
+#Emacs backups
+*~
