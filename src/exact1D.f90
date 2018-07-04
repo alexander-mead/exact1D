@@ -14,7 +14,7 @@ PROGRAM exact1D
   !Parameters
   LOGICAL, PARAMETER :: iran=.TRUE. !Set the random number generator
   LOGICAL, PARAMETER :: verbose=.TRUE. !Set the speaking level
-  INTEGER, PARAMETER :: n=11 !Number of sheets
+  INTEGER, PARAMETER :: n=101 !Number of sheets
   REAL, PARAMETER :: L=0.5 !Size of inital group
   REAL, PARAMETER :: t1=0. !Initial time (is this necessary?)
   REAL, PARAMETER :: t2=10. !Final time

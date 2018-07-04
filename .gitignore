@@ -5,6 +5,7 @@
 /particles
 /phase
 /power
+/build
 
 #Executables
 *.e
