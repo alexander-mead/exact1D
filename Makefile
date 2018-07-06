@@ -1,36 +1,58 @@
 # Makefile for 1D simualtion tools
 
+# NB: I had to move all of the source code, including the libraries, into the src/
+# directory. If I take them directly from lib then the USE statements in the modules
+# try to find the .mod files in the directory they are in first. This means they get them
+# from the library directory, preferentially compared to the build directory. This means
+# things do not work if you compile with different precision compared to those .mod files
+# that will exist in the library directory.
+
+# Set the Fortran compiler
 FC = gfortran
 
-#FFLAGS = -Warray-bounds -ffree-line-length-none -fmax-errors=4 -ffpe-trap=invalid,zero,overflow -fimplicit-none -O3 -L/usr/local/lib -lfftw3
+# Set the Fortran flags
+FFLAGS = -Warray-bounds \
+	-ffree-line-length-none \
+	-fmax-errors=4 \
+	-ffpe-trap=invalid,zero,overflow \
+	-fimplicit-none \
+	-fdefault-real-8 \
+	-fdefault-double-8 \
+	-std=gnu \
+	-O3
 
-FFLAGS = -Warray-bounds -ffree-line-length-none -fmax-errors=4 -ffpe-trap=invalid,zero,overflow -fimplicit-none -O3
-
+# Build directory (to keep things neat)
 BUILD = build
+
+# Source code directory
 SRC = src
-LIB = /Users/Mead/Physics/library
-EXEC = exact1D.e
-OBJS = $(BUILD)/fix_polynomial.o $(BUILD)/array_operations.o $(BUILD)/random_numbers.o $(SRC)/exact1D.f90
 
-$(EXEC): $(OBJS)
-	$(FC) --version
-	$(FC) $(FFLAGS) -I$(BUILD) -L$(BUILD) $^ -o $@
+# Executable
+EXEC = exact1D
 
-$(BUILD)/random_numbers.o: $(LIB)/random_numbers.f90
-	$(FC) $(FFLAGS) -c $^
-	mv random_numbers.o $(BUILD)/.
-	mv random_numbers.mod $(BUILD)/.
+# Object files
+_OBJS = constants.o \
+	fix_polynomial.o \
+	array_operations.o \
+	random_numbers.o \
+	numerology.o \
+	file_info.o \
+	sorting.o
 
-$(BUILD)/array_operations.o: $(LIB)/array_operations.f90
-	$(FC) $(FFLAGS) -c $^
-	mv array_operations.o $(BUILD)/.
-	mv array_operations.mod $(BUILD)/.
+# Append prefix of the build directory to all object files
+OBJS = $(addprefix $(BUILD)/,$(_OBJS))
 
-$(BUILD)/fix_polynomial.o: $(LIB)/fix_polynomial.f90
-	$(FC) $(FFLAGS) -c $^
-	mv fix_polynomial.o $(BUILD)/.
-	mv fix_polynomial.mod $(BUILD)/.
+# Rule to create the executable
+$(EXEC): $(OBJS) $(SRC)/exact1D.f90
+	@echo
+	@$(FC) --version
+	$(FC) -o $@ $^ -J$(BUILD) $(LDFLAGS) $(FFLAGS)
 
+# Rule to create the objects
+$(BUILD)/%.o: $(SRC)/%.f90
+	$(FC) -c -o $@ $< -J$(BUILD) $(LDFLAGS) $(FFLAGS)
+
+# Clean command
 clean:
 	rm -f $(BUILD)/*.o
 	rm -f $(BUILD)/*.mod
