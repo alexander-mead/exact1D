@@ -8,7 +8,7 @@
 /build
 
 #Executables
-*.e
+exact1D
 
 #Emacs backups
 *~
