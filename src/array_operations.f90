@@ -1,7 +1,144 @@
 MODULE array_operations
 
+  ! These interfaces did not work if -fdefault-real-8 and -fdefault-real-8 were set
+!!$  INTERFACE fill_array
+!!$     MODULE PROCEDURE fill_array_single
+!!$     MODULE PROCEDURE fill_array_double
+!!$  END INTERFACE fill_array
+!!$
+!!$  INTERFACE progression
+!!$     MODULE PROCEDURE progression_single
+!!$     MODULE PROCEDURE progression_double
+!!$  END INTERFACE progression
+!!$
+!!$  INTERFACE progression_log
+!!$     MODULE PROCEDURE progression_log_single
+!!$     MODULE PROCEDURE progression_log_double
+!!$  END INTERFACE progression_log
+
+  INTERFACE add_to_array
+     MODULE PROCEDURE add_to_array_2D
+     MODULE PROCEDURE add_to_array_3D
+  END INTERFACE add_to_array
+
 CONTAINS
 
+  SUBROUTINE add_to_array_2D(a,m,v,i)
+
+    ! Add value 'v' to array 'a' at location 'i' in array
+    ! If 'i' is outside the array range then this routine does nothing
+    IMPLICIT NONE
+    REAL, INTENT(INOUT) :: a(m,m)
+    INTEGER, INTENT(IN) :: m
+    REAL, INTENT(IN) :: v
+    INTEGER, INTENT(IN) :: i(2)
+    INTEGER :: j
+    LOGICAL :: bin
+    INTEGER, PARAMETER :: dim=2
+
+    bin=.TRUE.
+    DO j=1,dim
+       IF(i(j)<1 .OR. i(j)>m) THEN
+          bin=.FALSE.
+          EXIT
+       END IF
+    END DO
+
+    IF(bin) a(i(1),i(2))=a(i(1),i(2))+v
+    
+  END SUBROUTINE add_to_array_2D
+
+   SUBROUTINE add_to_array_3D(a,m,v,i)
+
+    ! Add value 'v' to array 'a' at location 'i' in array
+    ! If 'i' is outside the array range then this routine does nothing
+    IMPLICIT NONE
+    REAL, INTENT(INOUT) :: a(m,m,m)
+    INTEGER, INTENT(IN) :: m
+    REAL, INTENT(IN) :: v
+    INTEGER, INTENT(IN) :: i(3)
+    INTEGER :: j
+    LOGICAL :: bin
+    INTEGER, PARAMETER :: dim=3
+
+    bin=.TRUE.
+    DO j=1,dim
+       IF(i(j)<1 .OR. i(j)>m) THEN
+          bin=.FALSE.
+          EXIT
+       END IF
+    END DO
+
+    IF(bin) a(i(1),i(2),i(3))=a(i(1),i(2),i(3))+v
+    
+  END SUBROUTINE add_to_array_3D
+
+  INTEGER FUNCTION array_position(x,a,n)
+
+    ! Returns the location in a(n) of value x
+    ! If x is not in array then returns zero
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: x    ! Value to check if it is in array
+    INTEGER, INTENT(IN) :: a(n) ! Array to check 
+    INTEGER, INTENT(IN) :: n    ! Size of array
+    INTEGER :: i
+
+    array_position=0
+    
+    DO i=1,n
+       IF(a(i)==x) THEN
+          array_position=i
+          EXIT
+       END IF
+    END DO
+    
+  END FUNCTION array_position
+
+  INTEGER FUNCTION number_of_appearances(x,a,n)
+
+    ! Returns the number of appearances in a(n) of value x
+    ! If x is not in a(n) then returns zero
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: x    ! Value to check if it is in array
+    INTEGER, INTENT(IN) :: a(n) ! Array to check 
+    INTEGER, INTENT(IN) :: n    ! Size of array
+    INTEGER :: i
+
+    number_of_appearances=0
+    
+    DO i=1,n
+       IF(a(i)==x) THEN
+          number_of_appearances=number_of_appearances+1
+       END IF
+    END DO
+    
+  END FUNCTION number_of_appearances
+
+  SUBROUTINE array_positions(x,a,n,b,m)
+
+    ! Returns the locationS in the array of value x
+    ! If x is not in array then returns zero
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: x    ! Value to check if it is in array
+    INTEGER, INTENT(IN) :: a(n) ! Array to check 
+    INTEGER, INTENT(IN) :: n    ! Size of array
+    INTEGER, ALLOCATABLE, INTENT(OUT) :: b(:)
+    INTEGER, INTENT(OUT) :: m
+    INTEGER :: i, p
+
+    m=number_of_appearances(x,a,n)
+    ALLOCATE(b(m))
+
+    p=0
+    DO i=1,n
+       IF(a(i)==x) THEN
+          p=p+1
+          b(p)=i
+       END IF
+    END DO
+
+  END SUBROUTINE array_positions
+  
   FUNCTION sum_double(a,n)
 
     ! Sum using double precision, which is necessary for many array elements
@@ -18,13 +155,14 @@ CONTAINS
        sum=sum+a(i)
     END DO
 
-    sum_double=REAL(sum)
+    sum_double=real(sum)
 
   END FUNCTION sum_double
 
   SUBROUTINE amputate(arr,n_old,n_new)
 
     ! Chop an array down to a smaller size
+    ! TODO: Retire
     IMPLICIT NONE
     REAL, ALLOCATABLE, INTENT(INOUT) :: arr(:)
     REAL, ALLOCATABLE :: hold(:)
@@ -47,6 +185,45 @@ CONTAINS
 
   END SUBROUTINE amputate
 
+  SUBROUTINE amputate_general(a,n,m,i1,i2)
+
+    ! Chop an array of size a(n) down to a smaller size demarked by indices i1, i2
+    ! If i1=1 and i2=n then this does nothing
+    IMPLICIT NONE
+    REAL, ALLOCATABLE, INTENT(INOUT) :: a(:)
+    INTEGER, INTENT(IN) :: n
+    INTEGER, INTENT(OUT) :: m
+    INTEGER, INTENT(IN) :: i1, i2
+    REAL, ALLOCATABLE :: b(:)
+    INTEGER :: i
+
+    IF(i2<i1) THEN
+       STOP 'AMPUTATE: Error, i2 should be greater than i1'
+    END IF
+
+    m=i2-i1+1
+    IF(n<m) THEN
+       STOP 'AMPUTATE: Error, new array should be smaller than the old one'
+    END IF
+
+    ! Store input array and then deallocate
+    ALLOCATE(b(n))
+    b=a
+    DEALLOCATE(a)
+
+    ! Allocate new output array
+    ALLOCATE(a(m))
+
+    ! Fill new output array
+    DO i=1,m
+       a(i)=b(i+i1-1)
+    END DO
+
+    ! Deallocate holding array
+    DEALLOCATE(b)
+
+  END SUBROUTINE amputate_general
+
   SUBROUTINE reduce(arr1,n1,arr2,n2)
 
     ! Reduces the size of array1 to the size of array2
@@ -58,7 +235,7 @@ CONTAINS
     INTEGER :: i, j
 
     DO i=1,n2
-       j=1+CEILING(REAL((n1-1)*(i-1))/REAL(n2-1))
+       j=1+ceiling(real((n1-1)*(i-1))/real(n2-1))
        arr2(i)=arr1(j)
     END DO
 
@@ -76,7 +253,7 @@ CONTAINS
     ALLOCATE(hold(n))
 
     DO i=1,n
-       j=1+CEILING(REAL((n-1)*(i-1))/REAL(n-1))
+       j=1+ceiling(real((n-1)*(i-1))/real(n-1))
        hold(i)=arr1(j)
     END DO
 
@@ -151,13 +328,10 @@ CONTAINS
        max=log10(max)
     END IF
 
-    !This sets the limits for the bins!
-    !DO i=1,n+1
-    !   binlim(i)=min+(max-min)*REAL(i-1)/REAL(n)
-    !END DO
+    ! This sets the limits for the bins!
     CALL fill_array(min,max,binlim,n+1)
 
-    !This sets the centre value for each bin!
+    ! This sets the centre value for each bin!
     DO i=1,n
        b(i)=(binlim(i)+binlim(i+1))/2.
     END DO
@@ -254,10 +428,10 @@ CONTAINS
   SUBROUTINE fill_array_double(min,max,arr,n)
 
     ! Fills array 'arr' in equally spaced intervals
-    ! TODO: I'm not sure if inputting an array like this is okay
+    ! TODO: Not sure if inputting an array like this is okay
     IMPLICIT NONE
     INTEGER :: i
-    REAL, INTENT(IN) :: min, max
+    DOUBLE PRECISION, INTENT(IN) :: min, max
     DOUBLE PRECISION, ALLOCATABLE, INTENT(INOUT) :: arr(:)
     INTEGER, INTENT(IN) :: n
 
@@ -270,27 +444,39 @@ CONTAINS
        arr(1)=min
     ELSE IF(n>1) THEN
        DO i=1,n
-          arr(i)=progression8(min,max,i,n)
+          arr(i)=progression_double(min,max,i,n)
        END DO
     END IF
 
   END SUBROUTINE fill_array_double
 
-  FUNCTION progression(xmin,xmax,i,n)
+  REAL FUNCTION progression(xmin,xmax,i,n)
 
     IMPLICIT NONE
-    REAL :: progression
     REAL, INTENT(IN) :: xmin, xmax
     INTEGER, INTENT(IN) :: i, n
 
-    progression=xmin+(xmax-xmin)*REAL(i-1)/REAL(n-1)
+    IF(n==1) THEN
+       progression=xmin
+    ELSE
+       progression=xmin+(xmax-xmin)*real(i-1)/real(n-1)
+    END IF
     
   END FUNCTION progression
 
-  FUNCTION progression_log(xmin,xmax,i,n)
+  DOUBLE PRECISION FUNCTION progression_double(xmin,xmax,i,n)
 
     IMPLICIT NONE
-    REAL :: progression_log
+    DOUBLE PRECISION, INTENT(IN) :: xmin, xmax
+    INTEGER, INTENT(IN) :: i, n
+
+    progression_double=xmin+(xmax-xmin)*DBLE(i-1)/DBLE(n-1)
+    
+  END FUNCTION progression_double
+
+  REAL FUNCTION progression_log(xmin,xmax,i,n)
+
+    IMPLICIT NONE
     REAL, INTENT(IN) :: xmin, xmax
     INTEGER, INTENT(IN) :: i, n
 
@@ -298,16 +484,15 @@ CONTAINS
     
   END FUNCTION progression_log
 
-  FUNCTION progression8(xmin,xmax,i,n)
+  DOUBLE PRECISION FUNCTION progression_log_double(xmin,xmax,i,n)
 
     IMPLICIT NONE
-    DOUBLE PRECISION :: progression8
-    REAL, INTENT(IN) :: xmin, xmax
+    DOUBLE PRECISION, INTENT(IN) :: xmin, xmax
     INTEGER, INTENT(IN) :: i, n
 
-    progression8=xmin+(xmax-xmin)*DBLE(i-1)/DBLE(n-1)
+    progression_log_double=exp(progression_double(log(xmin),log(xmax),i,n))
     
-  END FUNCTION progression8
+  END FUNCTION progression_log_double
 
   FUNCTION maximum(x,y,n)
 
@@ -361,7 +546,7 @@ CONTAINS
 
   END FUNCTION maximum
 
-   SUBROUTINE mask(okay,m,n,min,max)
+  SUBROUTINE mask(okay,m,n,min,max)
 
     ! Flags objects that make the cut as 'okay'
     ! Can be applied to any scalar array, not just mass
@@ -385,11 +570,137 @@ CONTAINS
     o=COUNT(okay)
 
     WRITE(*,*) 'MASK: Final number of objects:', o
-    WRITE(*,*) 'MASK: Fraction remaining:', REAL(o)/REAL(n)
-    WRITE(*,*) 'MASK: Fraction culled:', 1.-REAL(o)/REAL(n)
+    WRITE(*,*) 'MASK: Fraction remaining:', real(o)/real(n)
+    WRITE(*,*) 'MASK: Fraction culled:', 1.-real(o)/real(n)
     WRITE(*,*) 'MASK: Done'
     WRITE(*,*)
 
   END SUBROUTINE mask
+
+  SUBROUTINE add_to_array(a,n,b)
+
+    ! Append b to array a(n) to make a new array a(n+1)
+    IMPLICIT NONE
+    INTEGER, ALLOCATABLE, INTENT(INOUT) :: a(:)
+    INTEGER, INTENT(IN) :: n
+    INTEGER, INTENT(IN) :: b
+    INTEGER :: hold(n)
+    INTEGER :: i
+
+    hold=a
+    DEALLOCATE(a)
+    ALLOCATE(a(n+1))
+
+    DO i=1,n
+       a(i)=hold(i)
+    END DO
+    a(n+1)=b
+
+  END SUBROUTINE add_to_array
+
+  INTEGER FUNCTION unique_entries(a,n)
+
+    ! Counts the total number of unique entries in array 'a'
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: a(n) ! Input array
+    INTEGER, INTENT(IN) :: n    ! Size of input array
+    INTEGER :: i, j
+
+    ! Initially assume all entries are unique
+    unique_entries=n
+
+    ! Double loop to each each pair against each other
+    DO i=1,n
+       DO j=i+1,n
+          IF(a(j)==a(i)) THEN
+             unique_entries=unique_entries-1 ! A non-unique entry has been discovered, so subtract one
+             EXIT
+          END IF
+       END DO
+    END DO
+
+  END FUNCTION unique_entries
+
+  SUBROUTINE unique_index(array,n,unique,m,match)
+
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: array(n)
+    INTEGER, INTENT(IN) :: n
+    INTEGER, ALLOCATABLE, INTENT(OUT) :: unique(:)
+    INTEGER, INTENT(OUT) :: m
+    INTEGER, INTENT(OUT) :: match(n)
+    INTEGER :: i, j, p
+    LOGICAL :: increment
+    
+    ! First count the number of unique entries
+    m=unique_entries(array,n)
+    ALLOCATE(unique(m))
+
+    ! Set the first unique entry to be the first entry
+    unique(1)=array(1)
+
+    p=1
+    DO i=1,n
+       increment=.FALSE.
+       DO j=1,p
+          IF(array(i) /= unique(j)) THEN
+             unique(p+1)=array(i)
+             increment=.TRUE.
+             EXIT
+          END IF
+       END DO
+       IF(increment) p=p+1
+    END DO
+
+    ! Now fill the matching array
+    DO j=1,m
+       DO i=1,n
+          IF(unique(j)==array(i)) THEN
+             match(i)=j
+          END IF
+       END DO
+    END DO
+  
+  END SUBROUTINE unique_index
+
+!!$  LOGICAL FUNCTION in_array(b,a,n)
+!!$
+!!$    ! Test to see if b is in a(n)
+!!$    IMPLICIT NONE
+!!$    INTEGER, INTENT(IN) :: b
+!!$    INTEGER, INTENT(IN) :: a(n)
+!!$    INTEGER, INTENT(IN) :: n
+!!$    INTEGER :: i
+!!$
+!!$    DO i=1,n
+!!$       IF(b==a(i)) THEN
+!!$          in_array=.TRUE.
+!!$       END IF
+!!$       EXIT
+!!$    END DO
+!!$
+!!$  END FUNCTION in_array
+
+  LOGICAL FUNCTION repeated_entries(a,n)
+
+    ! Checks for repeated entries in a(n)
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: a(n)
+    INTEGER, INTENT(IN) :: n
+    INTEGER :: i, j
+
+    repeated_entries=.FALSE.
+    
+    DO i=1,n
+       DO j=i+1,n
+          IF(a(i)==a(j)) THEN
+             repeated_entries=.TRUE.
+             EXIT
+          END IF
+       END DO
+       IF(repeated_entries) EXIT
+    END DO
+    
+  END FUNCTION repeated_entries
 
 END MODULE array_operations

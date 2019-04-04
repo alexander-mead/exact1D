@@ -11,7 +11,8 @@
 FC = gfortran
 
 # Set the Fortran flags
-FFLAGS = -Warray-bounds \
+FFLAGS = \
+	-Warray-bounds \
 	-ffree-line-length-none \
 	-fmax-errors=4 \
 	-ffpe-trap=invalid,zero,overflow \
@@ -20,6 +21,14 @@ FFLAGS = -Warray-bounds \
 	-fdefault-double-8 \
 	-std=gnu \
 	-O3
+
+# Debugging flags
+DEBUG_FLAGS = \
+	-Wall \
+	-fcheck=all \
+	-fbounds-check \
+	-fbacktrace \
+	-Og
 
 # Build directory (to keep things neat)
 BUILD = build
@@ -31,7 +40,9 @@ SRC = src
 EXEC = exact1D
 
 # Object files
-_OBJS = constants.o \
+_OBJS = \
+	constants.o \
+	logical_operations.o \
 	fix_polynomial.o \
 	array_operations.o \
 	random_numbers.o \
@@ -47,6 +58,9 @@ $(EXEC): $(OBJS) $(SRC)/exact1D.f90
 	@echo
 	@$(FC) --version
 	$(FC) -o $@ $^ -J$(BUILD) $(LDFLAGS) $(FFLAGS)
+
+debug: FFLAGS += $(DEBUG_FLAGS)
+debug: $(EXEC)
 
 # Rule to create the objects
 $(BUILD)/%.o: $(SRC)/%.f90

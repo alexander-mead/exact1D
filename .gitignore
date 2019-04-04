@@ -1,13 +1,14 @@
 #directories
-/OLD
+/old
 /data
 /histogram
 /particles
 /phase
 /power
 /build
+/backup
 
-#Executables
+#Executable
 exact1D
 
 #Emacs backups
