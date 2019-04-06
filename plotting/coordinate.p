@@ -15,8 +15,7 @@ name(i)=sprintf('%d',i)
 unset key
 
 # Number of sheets
-# Setting this higher than the actual number is okay, but decreases plotting speed
-n=50
+if(!exists('n')){n=50}
 print 'Number of sheets: n: ', n
 
 # Set margins for multiplot
@@ -37,7 +36,6 @@ set yrange [-X:X]
 set ylabel 'Position'
 
 # Plot position data
-#plot for [i=1:n] 'output.dat' u 1:(column(2*i)) w p pt 1 lc -1 ti name(i)
 plot for [i=1:n] 'data/output.dat' u 1:(column(2*i)) w l lw 1 ti name(i)
 
 # Set the velocty axis range

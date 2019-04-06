@@ -1,11 +1,28 @@
 PROGRAM exact1D
 
   USE random_numbers
+  USE logical_operations
   USE numerology
   USE array_operations
   USE sorting
+  !USE field_operations
 
   ! Solves *exactly* (i.e., to machine precision) the evoltion of 'n' interacting sheets
+
+  ! Potential improvements:
+  ! Give each sheet an 'acceleration contribution' and then ditch G
+  ! Consider sheets with different surface-mass densities
+
+  ! Potential speed ups:
+  ! Do not need array for the acceleration, could just use position info
+  ! Use sorting algorithm for collision times
+  ! Method 1 is way faster, but does not work if there are simultaneous collisions
+  ! There is probably a nice hybrid method to use
+
+  ! Potential problems:
+  ! Different pairs of sheets collide at exactly the same time, but at different positions
+  ! Quantised positions and velocities due to numerical precision
+  
   IMPLICIT NONE
   REAL, ALLOCATABLE :: x0(:), v0(:), a0(:), t0(:), collision_times(:)
   REAL, ALLOCATABLE :: output_times(:)
@@ -25,6 +42,9 @@ PROGRAM exact1D
   REAL, ALLOCATABLE :: phase_shot(:,:)
   REAL, ALLOCATABLE :: phase_space(:,:)
 
+  REAL :: final_time
+  INTEGER :: n, ntimes, iseed
+
   ! Parameters
   LOGICAL, PARAMETER :: verbose=.FALSE.        ! Set the speaking level
   LOGICAL, PARAMETER :: extra_verbose=.FALSE.  ! Set the extra speaking level
@@ -35,32 +55,33 @@ PROGRAM exact1D
   INTEGER, PARAMETER :: index_method=2         ! Indexing method
   LOGICAL, PARAMETER :: use_restart=.FALSE.    ! Use previous simulation end
 
-  INTEGER :: n=50                             ! Number of sheets
-  REAL, PARAMETER :: L=1.                     ! Size of inital group
-  INTEGER, PARAMETER :: iseed=0               ! Random-number seed
-  LOGICAL, PARAMETER :: ran_offsets=.TRUE.    ! Do random offsetting
-  REAL, PARAMETER :: alpha=0.01               ! Amount to offset in terms of spacing (1 is maximum)
-  LOGICAL, PARAMETER :: ran_velocities=.TRUE. ! Do random velocties  
-  REAL, PARAMETER :: beta=0.01                ! Random velocity maximum
+  !INTEGER :: n=25                              ! Number of sheets
+  REAL, PARAMETER :: L=1.                      ! Size of inital group
+  !INTEGER, PARAMETER :: iseed=0                ! Random-number seed
+  LOGICAL, PARAMETER :: ran_offsets=.TRUE.     ! Do random offsetting
+  REAL, PARAMETER :: dx=1e-1                   ! Amount to offset in terms of spacing (1 is maximum)
+  LOGICAL, PARAMETER :: ran_velocities=.FALSE. ! Do random velocties  
+  REAL, PARAMETER :: dv=1e-2                   ! Random velocity maximum
+  REAL, PARAMETER :: Gcon=1.                   ! Constant (ensures dynamical time is to reach centre)
+  REAL, PARAMETER :: dx_phase=2.               ! Extent of phase-space distribution in x in units of L
+  REAL, PARAMETER :: dv_phase=2.*dx_phase      ! Extent of phase-space distribution in v in units of L
+
+  ! Phase-space binning scheme
+  ! 1 - NGP
+  ! 2 - CIC
+  INTEGER, PARAMETER :: ibin_phase=2
 
   REAL, PARAMETER :: initial_time=0. ! Initial time (is this necessary?)
-  REAL, PARAMETER :: final_time=10.  ! Final time
-  INTEGER, PARAMETER :: ntimes=500   ! Number of time outputs
+  !REAL, PARAMETER :: final_time=100.  ! Final time
+  !INTEGER, PARAMETER :: ntimes=500   ! Number of time outputs
 
   INTEGER, PARAMETER :: mesh_phase=256 ! Phase-space mesh size
 
-  ! Potential improvements:
-  ! Give each sheet an 'acceleration contribution' and then ditch G
-
-  ! Potential speed ups:
-  ! Do not need array for the acceleration, could just use position info
-  ! Use sorting algorithm for collision times
-  ! Method 1 is way faster, but does not work if there are simultaneous collisions
-  ! There is probably a nice hybrid method to use
-
-  ! Potential problems:
-  ! Different pairs of sheets collide at exactly the same time, but at different positions
-  ! Quantised positions and velocities due to numerical precision
+  ! Read arguments
+  CALL read_command_argument(1,n,'Number of sheets')
+  CALL read_command_argument(2,iseed,'Random seed')
+  CALL read_command_argument(3,final_time,'Simulation duration in dynamical times')
+  CALL read_command_argument(4,ntimes,'Number of linearly-spaced output times')
 
   WRITE(*,*)
   WRITE(*,*) 'EXACT1D: 1D particle calculation'
@@ -76,7 +97,7 @@ PROGRAM exact1D
      infile='data/end.dat'
      WRITE(*,*) 'EXACT1D: Starting simulation from restart file: ', TRIM(infile)
      CALL read_restart(x0,v0,a0,id,n,infile)
-     G=1./REAL(n-1)
+     G=Gcon/REAL(n-1)
      WRITE(*,*)
 
   ELSE
@@ -90,13 +111,13 @@ PROGRAM exact1D
 
      IF(ran_offsets) THEN
         WRITE(*,*) 'EXACT1D: Sheets are randomly offset from equally spaced'
-        WRITE(*,*) 'EXACT1D: Offset, in terms of the inter-sheet spacing:', alpha
+        WRITE(*,*) 'EXACT1D: Offset, in terms of the inter-sheet spacing:', dx
      ELSE
         WRITE(*,*) 'EXACT1D: Sheets start equally spaced' 
      END IF
      IF(ran_velocities) THEN
         WRITE(*,*) 'EXACT1D: Sheets start with random velocities'
-        WRITE(*,*) 'EXACT1D: Sheet random velocity:', beta
+        WRITE(*,*) 'EXACT1D: Sheet random velocity:', dv
      ELSE
         WRITE(*,*) 'EXACT1D: Sheets start stationary'
      END IF
@@ -105,7 +126,7 @@ PROGRAM exact1D
      CALL fill_array(-L/2.,L/2.,x0,n)
 
      ! Do some random offsets
-     IF(ran_offsets) CALL random_offsets(x0,L,n)
+     IF(ran_offsets) CALL random_offsets(x0,L,n,dx)
 
      ! Check that the sheets are arranged correctly
      DO i=1,n-1
@@ -121,7 +142,7 @@ PROGRAM exact1D
      IF(ran_velocities) THEN
         ! Assign some random velocities
         DO i=1,n
-           v0(i)=random_uniform(-beta,beta)
+           v0(i)=random_uniform(-dv,dv)
         END DO
         vbar=SUM(v0)/REAL(n) ! Calculate the mean velocity
         v0=v0-vbar ! Ensure that the mean velocity is zero
@@ -133,7 +154,8 @@ PROGRAM exact1D
      ! Set the initial accelerations, which only depend on the particle position
      ! Acceleration array does not change EVER if we keep the array order to be the positional order
      ! Total Acceleration should be G/(n-1)
-     G=1./REAL(n-1)
+     ! TODO: Could change this so that sheets had different surface-density
+     G=Gcon/REAL(n-1)
      CALL fill_array(G*(n-1),-G*(n-1),a0,n)     
      !CALL fill_array((n-1)/REAL(n-1),-(n-1)/REAL(n-1),a0,n)     
 
@@ -194,14 +216,15 @@ PROGRAM exact1D
   END IF
 
   ! Calculate the initial energy of the system
-  initial_energy=kinetic_energy(initial_time,v0,a0,t0,n)+potential_energy(initial_time,x0,v0,a0,t0,n)
+  !initial_energy=kinetic_energy(initial_time,v0,a0,t0,n)+potential_energy(initial_time,x0,v0,a0,t0,n)
+  initial_energy=total_energy(initial_time,x0,v0,a0,t0,n,G)
 
   ! Initial write of data to file/screen
   CALL write_data(output_times(1),x0,v0,a0,t0,id,n,fp1)
-  CALL write_energy(output_times(1),x0,v0,a0,t0,n,fp2)
+  CALL write_energy(output_times(1),x0,v0,a0,t0,n,G,fp2)
   ALLOCATE(phase_shot(mesh_phase,mesh_phase),phase_space(mesh_phase,mesh_phase))
   phase_space=0.
-  CALL make_phase_space(2.*L,4.*L,output_times(1),x0,v0,a0,t0,n,phase_shot,mesh_phase)
+  CALL make_phase_space(dx_phase*L,dv_phase*L,output_times(1),x0,v0,a0,t0,n,phase_shot,mesh_phase)
   phase_space=phase_space+phase_shot 
 
   ! Loop over output times
@@ -328,8 +351,8 @@ PROGRAM exact1D
 
      ! Otherwise write data for file/screen when the output time is before the next collision
      CALL write_data(output_times(i+1),x0,v0,a0,t0,id,n,fp1)
-     CALL write_energy(output_times(i+1),x0,v0,a0,t0,n,fp2)
-     CALL make_phase_space(2.*L,4.*L,output_times(i+1),x0,v0,a0,t0,n,phase_shot,mesh_phase)
+     CALL write_energy(output_times(i+1),x0,v0,a0,t0,n,G,fp2)
+     CALL make_phase_space(dx_phase*L,dv_phase*L,output_times(i+1),x0,v0,a0,t0,n,phase_shot,mesh_phase)
      phase_space=phase_space+phase_shot
 
   END DO
@@ -348,7 +371,8 @@ PROGRAM exact1D
   CALL write_restart(final_time,x0,v0,a0,t0,n,outfile)
 
   ! Calculate the final energy
-  final_energy=kinetic_energy(final_time,v0,a0,t0,n)+potential_energy(final_time,x0,v0,a0,t0,n)
+  !final_energy=kinetic_energy(final_time,v0,a0,t0,n)+potential_energy(final_time,x0,v0,a0,t0,n)
+  final_energy=total_energy(final_time,x0,v0,a0,t0,n,G)
 
   ! Write a nice grid to screen
   IF(verbose) THEN
@@ -367,9 +391,16 @@ CONTAINS
   SUBROUTINE make_phase_space(L,U,t,x0,v0,a0,t0,n,p,m)
 
     IMPLICIT NONE   
-    REAL, INTENT(IN) :: L, U, t, x0(n), v0(n), a0(n), t0(n)
-    INTEGER, INTENT(IN) :: n, m
+    REAL, INTENT(IN) :: L
+    REAL, INTENT(IN) :: U
+    REAL, INTENT(IN) :: t
+    REAL, INTENT(IN) :: x0(n)
+    REAL, INTENT(IN) :: v0(n)
+    REAL, INTENT(IN) :: a0(n)
+    REAL, INTENT(IN) :: t0(n)
+    INTEGER, INTENT(IN) :: n
     REAL, ALLOCATABLE, INTENT(OUT) :: p(:,:)
+    INTEGER, INTENT(IN) :: m
     REAL :: xv(2,n), w(n), LU(2)
     INTEGER :: m2(2), i
 
@@ -379,14 +410,16 @@ CONTAINS
     END DO
 
     w=1.
-    m2=m
     LU(1)=L
     LU(2)=U
+    m2=m
     DO  i=1,2
        xv(i,:)=xv(i,:)+LU(i)/2.
     END DO
     ALLOCATE(p(m2(1),m2(2)))
-    CALL CIC2D(xv,n,LU,w,p,m2)
+    !ALLOCATE(p(m,m))
+    CALL CIC_2D(xv,n,LU,w,p,m2)
+    !CALL particle_bin_2D(xv,n,LU,w,p,m,ibin_phase,all=.FALSE.,periodic=.FALSE.)
     p=p/(REAL(n)/REAL(mesh_phase)**2)
 
   END SUBROUTINE make_phase_space
@@ -470,9 +503,9 @@ CONTAINS
     ! Calculates the collision time between pair labelled '1' and '2'
     IMPLICIT NONE
     REAL :: collision_time
-    REAL, INTENT(IN) :: x1, v1, a1, t1
-    REAL, INTENT(IN) :: x2, v2, a2, t2
     REAL, INTENT(IN) :: t
+    REAL, INTENT(IN) :: x1, v1, a1, t1
+    REAL, INTENT(IN) :: x2, v2, a2, t2    
     REAL :: discrim, tc1, tc2, tc, ts
     REAL :: A, B, C
 
@@ -496,11 +529,13 @@ CONTAINS
        ! No solution (does this even happen?)
        collision_time=HUGE(tc)
        IF(cases) WRITE(*,*) 'Case 1: Discriminant is negative, no solution'
+       WRITE(*,*) 'COLLISION_TIME: Time:', t
        STOP 'COLLISION_TIME: Case 1: Discriminant is negative, no solution'
     ELSE IF(discrim==0. .AND. a1==a2) THEN
        ! Solution is 'at infinity'
        collision_time=HUGE(tc)
        IF(cases) WRITE(*,*) 'Case 2: Solution is at infinifty'
+       WRITE(*,*) 'COLLISION_TIME: Time:', t
        STOP 'COLLISION_TIME: Case 2: Solution is at infinifty'
     ELSE IF(discrim==0.) THEN
        ! Single solution
@@ -508,6 +543,7 @@ CONTAINS
        IF(tc<=ts) THEN
           collision_time=HUGE(tc)
           IF(cases) WRITE(*,*) 'Case 3: ?'
+          WRITE(*,*) 'COLLISION_TIME: Time:', t
           STOP 'COLLISION_TIME: Case 3: ?'
        ELSE
           collision_time=tc
@@ -524,6 +560,7 @@ CONTAINS
           ! Both solutions in the past (should this ever happen?)
           collision_time=HUGE(tc) 
           IF(cases) WRITE(*,*) 'Case 5: Both solutions are in the past'
+          WRITE(*,*) 'COLLISION_TIME: Time:', t
           STOP 'COLLISION_TIME: Case 5: Both solutions are in the past'
        ELSE IF(tc1>ts .AND. tc2>ts) THEN
           collision_time=tc1
@@ -535,6 +572,7 @@ CONTAINS
           collision_time=tc2
           IF(cases) WRITE(*,*) 'Case 8: Two solutions, picked minimum'
        ELSE
+          WRITE(*,*) 'COLLISION_TIME: Time:', t
           STOP 'COLLISION_TIME: Error, quadratic not solved correctly'
        END IF
 !!$       collision_time=MIN(tc1,tc2)
@@ -544,18 +582,19 @@ CONTAINS
 
   END FUNCTION collision_time
 
-  SUBROUTINE random_offsets(x,L,n)
+  SUBROUTINE random_offsets(x,L,n,ddx)
 
     ! Give sheets random offsets
     IMPLICIT NONE
     REAL, INTENT(INOUT) :: x(n)
     REAL, INTENT(IN) :: L
     INTEGER, INTENT(IN) :: n
+    REAL, INTENT(IN) :: ddx
     REAL :: dx
     INTEGER :: i
 
     ! Set the offset to be the spacing between the sheets
-    dx=alpha*L/REAL(n)
+    dx=ddx*L/REAL(n)
 
     ! Do the offsetting
     DO i=1,n
@@ -586,14 +625,30 @@ CONTAINS
 
   END FUNCTION velocity
 
-  FUNCTION kinetic_energy(t,v0,a0,t0,n)
+  REAL FUNCTION total_energy(t,x0,v0,a0,t0,n,G)
+
+    IMPLICIT NONE
+    REAL, INTENT(IN) :: t
+    REAL, INTENT(IN) :: x0(n)
+    REAL, INTENT(IN) :: v0(n)
+    REAL, INTENT(IN) :: a0(n)
+    REAL, INTENT(IN) :: t0(n)
+    INTEGER, INTENT(IN) :: n
+    REAL, INTENT(IN) :: G
+
+    total_energy=kinetic_energy(t,v0,a0,t0,n)+potential_energy(t,x0,v0,a0,t0,n,G)
+    
+  END FUNCTION total_energy
+
+  REAL FUNCTION kinetic_energy(t,v0,a0,t0,n)
 
     ! Calculates the total kinetic energy of the set of sheets
     IMPLICIT NONE
-    REAL :: kinetic_energy
-    REAL, INTENT(IN) :: v0(n), a0(n), t0(n)
-    INTEGER, INTENT(IN) :: n
     REAL, INTENT(IN) :: t
+    REAL, INTENT(IN) :: v0(n)
+    REAL, INTENT(IN) :: a0(n)
+    REAL, INTENT(IN) :: t0(n)
+    INTEGER, INTENT(IN) :: n   
     REAL :: K, v
     INTEGER :: i
 
@@ -611,14 +666,17 @@ CONTAINS
 
   END FUNCTION kinetic_energy
 
-  FUNCTION potential_energy(t,x0,v0,a0,t0,n)
+  REAL FUNCTION potential_energy(t,x0,v0,a0,t0,n,G)
 
     ! Calculates the total potential energy of the set of sheets
     IMPLICIT NONE
-    REAL :: potential_energy
-    REAL, INTENT(IN) :: x0(n), v0(n), a0(n), t0(n)
-    INTEGER, INTENT(IN) :: n
     REAL, INTENT(IN) :: t
+    REAL, INTENT(IN) :: x0(n)
+    REAL, INTENT(IN) :: v0(n)
+    REAL, INTENT(IN) :: a0(n)
+    REAL, INTENT(IN) :: t0(n)
+    INTEGER, INTENT(IN) :: n
+    REAL, INTENT(IN) :: G
     REAL :: P, x(n)
     INTEGER :: i, j
 
@@ -673,7 +731,10 @@ CONTAINS
     ! Figure out where the sheets are and write to file
     IMPLICIT NONE
     REAL, INTENT(IN) :: t
-    REAL, INTENT(IN) :: x0(n), v0(n), a0(n), t0(n)
+    REAL, INTENT(IN) :: x0(n)
+    REAL, INTENT(IN) :: v0(n)
+    REAL, INTENT(IN) :: a0(n)
+    REAL, INTENT(IN) :: t0(n)
     INTEGER, INTENT(IN) :: n
     CHARACTER(len=*), INTENT(IN) :: outfile
     INTEGER :: i
@@ -694,8 +755,14 @@ CONTAINS
 
     ! Figure out where the sheets are in the arrays and write to file
     IMPLICIT NONE
-    REAL, INTENT(IN) :: t, x0(n), v0(n), a0(n), t0(n)
-    INTEGER, INTENT(IN) :: id(n), n, fp
+    REAL, INTENT(IN) :: t
+    REAL, INTENT(IN) :: x0(n)
+    REAL, INTENT(IN) :: v0(n)
+    REAL, INTENT(IN) :: a0(n)
+    REAL, INTENT(IN) :: t0(n)
+    INTEGER, INTENT(IN) :: id(n)
+    INTEGER, INTENT(IN) :: n
+    INTEGER, INTENT(IN) :: fp
     INTEGER :: i, j, idx(n)
     REAL :: xn(n), vn(n)
 
@@ -731,16 +798,22 @@ CONTAINS
 
   END SUBROUTINE write_data
 
-  SUBROUTINE write_energy(t,x0,v0,a,t0,n,fp)
+  SUBROUTINE write_energy(t,x0,v0,a,t0,n,G,fp)
 
     IMPLICIT NONE
-    REAL, INTENT(IN) :: t, x0(n), v0(n), a(n), t0(n)
-    INTEGER, INTENT(IN) :: n, fp
+    REAL, INTENT(IN) :: t
+    REAL, INTENT(IN) :: x0(n)
+    REAL, INTENT(IN) :: v0(n)
+    REAL, INTENT(IN) :: a(n)
+    REAL, INTENT(IN) :: t0(n)
+    INTEGER, INTENT(IN) :: n
+    REAL, INTENT(IN) :: G
+    INTEGER, INTENT(IN) :: fp
     REAL :: K, V, E, Vir
 
     ! Calculate the energies
     K=kinetic_energy(t,v0,a,t0,n)
-    V=potential_energy(t,x0,v0,a,t0,n)
+    V=potential_energy(t,x0,v0,a,t0,n,G)
     E=K+V
     Vir=K/V
 
@@ -750,45 +823,49 @@ CONTAINS
 
   END SUBROUTINE write_energy
 
-  INTEGER FUNCTION NGP_cell(x,L,m)
+!!$  INTEGER FUNCTION NGP_cell(x,L,m)
+!!$
+!!$    ! Find the integer coordinates of the cell that coordinate x is in
+!!$    ! NOTE: Copied here because otherwise field_operations.f90 requires fft.f90
+!!$    IMPLICIT NONE
+!!$    REAL, INTENT(IN) :: x ! Particle position
+!!$    REAL, INTENT(IN) :: L ! Box size
+!!$    INTEGER, INTENT(IN) :: m ! Number of mesh cells in grid
+!!$
+!!$    IF(x==0.) THEN
+!!$       ! Catch this edge case
+!!$       NGP_cell=1
+!!$    ELSE
+!!$       NGP_cell=CEILING(x*REAL(m)/L)
+!!$    END IF
+!!$
+!!$    IF(NGP_cell<1 .OR. NGP_cell>m) THEN
+!!$       WRITE(*,*) 'NGP_CELL: Particle position [Mpc/h]:', x
+!!$       WRITE(*,*) 'NGP_CELL: Box size [Mpc/h]:', L
+!!$       WRITE(*,*) 'NGP_CELL: Mesh size:', m 
+!!$       WRITE(*,*) 'NGP_CELL: Assigned cell:', NGP_cell
+!!$       STOP 'NGP_CELL: Error, the assigned cell position is outside the mesh'
+!!$    END IF
+!!$
+!!$  END FUNCTION NGP_cell
+!!$
+!!$  REAL FUNCTION cell_position(i,L,m)
+!!$
+!!$    ! Gets the coordinates of cell centre i in box of length L with m cells
+!!$    ! NOTE: Copied here because otherwise field_operations.f90 requires fft.f90
+!!$    IMPLICIT NONE
+!!$    REAL, INTENT(IN) :: L
+!!$    INTEGER, INTENT(IN) :: i, m
+!!$
+!!$    cell_position=L*(i-0.5)/REAL(m)
+!!$
+!!$  END FUNCTION cell_position
 
-    ! Find the integer coordinates of the cell that coordinate x is in
-    IMPLICIT NONE
-    REAL, INTENT(IN) :: x ! Particle position
-    REAL, INTENT(IN) :: L ! Box size
-    INTEGER, INTENT(IN) :: m ! Number of mesh cells in grid
-
-    IF(x==0.) THEN
-       ! Catch this edge case
-       NGP_cell=1
-    ELSE
-       NGP_cell=CEILING(x*REAL(m)/L)
-    END IF
-
-    IF(NGP_cell<1 .OR. NGP_cell>m) THEN
-       WRITE(*,*) 'NGP_CELL: Particle position [Mpc/h]:', x
-       WRITE(*,*) 'NGP_CELL: Box size [Mpc/h]:', L
-       WRITE(*,*) 'NGP_CELL: Mesh size:', m 
-       WRITE(*,*) 'NGP_CELL: Assigned cell:', NGP_cell
-       STOP 'NGP_CELL: Error, the assigned cell position is outside the mesh'
-    END IF
-
-  END FUNCTION NGP_cell
-
-  REAL FUNCTION cell_position(i,L,m)
-
-    ! Gets the coordinates of cell centre i in box of length L with m cells
-    IMPLICIT NONE
-    REAL, INTENT(IN) :: L
-    INTEGER, INTENT(IN) :: i, m
-
-    cell_position=L*(i-0.5)/REAL(m)
-
-  END FUNCTION cell_position
-
-  SUBROUTINE CIC2D(x,n,L,w,d,m)
+  SUBROUTINE CIC_2D(x,n,L,w,d,m)
 
     ! This could probably be usefully combined with CIC somehow
+    ! NOTE: Copied here because otherwise field_operations.f90 requires fft.f90
+    ! NOTE: Different from simulations.f90 version because of L(2) and m(2)
     IMPLICIT NONE
     REAL, INTENT(IN) :: x(2,n), w(n), L(2)
     INTEGER, INTENT(IN) :: n, m(2)
@@ -799,8 +876,8 @@ CONTAINS
     LOGICAL, PARAMETER :: verbose=.FALSE.
 
     IF(verbose) THEN
-       WRITE(*,*) 'CIC2D: Binning particles and creating density field'
-       WRITE(*,*) 'CIC2D: Cells:', m
+       WRITE(*,*) 'CIC_2D: Binning particles and creating density field'
+       WRITE(*,*) 'CIC_2D: Cells:', m
     END IF
 
     ! Set array to zero explicitly because it is used for a sum
@@ -839,10 +916,242 @@ CONTAINS
     END DO
 
     IF(verbose) THEN
-       WRITE(*,*) 'CIC2D: Binning complete'
+       WRITE(*,*) 'CIC_2D: Binning complete'
        WRITE(*,*)
     END IF
 
-  END SUBROUTINE CIC2D
+  END SUBROUTINE CIC_2D
+
+  INTEGER FUNCTION NGP_cell(x,L,m)
+
+    ! Find the integer coordinates of the cell that coordinate x is in
+    IMPLICIT NONE
+    REAL, INTENT(IN) :: x    ! Particle position
+    REAL, INTENT(IN) :: L    ! Box size (could be Mpc/h or angle or something else)
+    INTEGER, INTENT(IN) :: m ! Number of mesh cells in grid
+
+    IF(x==0.) THEN
+       ! Catch this edge case
+       NGP_cell=1
+    ELSE
+       NGP_cell=ceiling(x*real(m)/L)
+    END IF
+
+  END FUNCTION NGP_cell
+
+  REAL FUNCTION cell_position(i,L,m)
+
+    ! Gets the coordinates of cell centre i in box of length L with m cells
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: i ! Integer label for cell
+    REAL, INTENT(IN) :: L    ! Actual size corresponding to volume
+    INTEGER, INTENT(IN) :: m ! Number of mesh cells
+
+    cell_position=L*(i-0.5)/real(m)
+
+  END FUNCTION cell_position
+
+!!$   SUBROUTINE particle_bin_2D(x,n,L,w,d,m,ibin,all,periodic)
+!!$
+!!$    ! Bin particle properties onto a mesh, summing as you go
+!!$    IMPLICIT NONE
+!!$    REAL, INTENT(IN) :: x(2,n)       ! 2D particle positions
+!!$    INTEGER, INTENT(IN) :: n         ! Total number of particles in area
+!!$    REAL, INTENT(IN) :: L            ! Area side length
+!!$    REAL, INTENT(IN) :: w(n)         ! Weight array
+!!$    REAL, INTENT(OUT) :: d(m,m)      ! Output of eventual 2D density field
+!!$    INTEGER, INTENT(IN) :: m         ! Mesh size for density field
+!!$    INTEGER, INTENT(IN) :: ibin   ! Binning strategy
+!!$    LOGICAL, INTENT(IN) :: all       ! Should all particles be contributing to the binning?
+!!$    LOGICAL, INTENT(IN) :: periodic  ! Is the volume periodic?
+!!$
+!!$    IF(periodic .AND. (.NOT. all)) STOP 'PARTICLE_BIN_2D: Very strange to have periodic and not all particles contribute'
+!!$
+!!$    IF(ibin==1) THEN
+!!$       CALL NGP_2D(x,n,L,w,d,m,all)
+!!$    ELSE IF(ibin==2) THEN
+!!$       CALL CIC_2D(x,n,L,w,d,m,all,periodic)
+!!$    ELSE
+!!$       STOP 'PARTICLE_BIN_2D: Error, ibin not specified correctly'
+!!$    END IF
+!!$
+!!$  END SUBROUTINE particle_bin_2D
+
+!!$   SUBROUTINE NGP_2D(x,n,L,w,d,m,all)
+!!$
+!!$    ! Nearest-grid-point binning routine
+!!$    ! NOTE: I changed this so that binning array is INOUT and could be not empty initially so could be added to
+!!$    !USE statistics
+!!$    IMPLICIT NONE
+!!$    REAL, INTENT(IN) :: x(2,n)    ! particle positions
+!!$    INTEGER, INTENT(IN) :: n      ! Total number of particles in area
+!!$    REAL, INTENT(IN) :: L         ! Area side length
+!!$    REAL, INTENT(IN) :: w(n)      ! Weight array
+!!$    REAL, INTENT(INOUT) :: d(m,m) ! Output of eventual 2D density field
+!!$    INTEGER, INTENT(IN) :: m      ! Mesh size for density field
+!!$    LOGICAL, INTENT(IN) :: all    ! Should all particles be contributing to the binning?
+!!$    INTEGER :: i, j, ix(2)
+!!$    LOGICAL :: outside
+!!$    INTEGER, PARAMETER :: dim=2
+!!$    
+!!$    WRITE(*,*) 'NGP_2D: Binning particles and creating field'
+!!$    WRITE(*,*) 'NGP_2D: Binning region size:', L
+!!$    WRITE(*,*) 'NGP_2D: Cells:', m
+!!$
+!!$    DO i=1,n
+!!$
+!!$       ! Get the integer coordinates of the cell
+!!$       DO j=1,dim
+!!$          ix(j)=NGP_cell(x(j,i),L,m)
+!!$       END DO
+!!$
+!!$       ! Check if particles are outside the mesh region
+!!$       outside=.FALSE.
+!!$       DO j=1,dim
+!!$          IF(ix(j)<1 .OR. ix(j)>m) outside=.TRUE.
+!!$       END DO
+!!$
+!!$       ! If the particle is outside the mesh region then either make an error or cycle
+!!$       IF(outside) THEN
+!!$          IF(all) THEN
+!!$             DO j=1,dim
+!!$                WRITE(*,*) 'NGP_2D: Coordinate:', j
+!!$                WRITE(*,*) 'NGP_2D: position:', x(j,i)
+!!$                WRITE(*,*) 'NGP_2D: cell: ', ix(j)
+!!$             END DO
+!!$             STOP 'NGP_2D: Error, particle outside boundary'
+!!$          ELSE
+!!$             CYCLE
+!!$          END IF
+!!$       END IF 
+!!$
+!!$       ! Do the binning
+!!$       d(ix(1),ix(2))=d(ix(1),ix(2))+w(i)
+!!$
+!!$    END DO
+!!$
+!!$    WRITE(*,*) 'NGP_2D: Binning complete'
+!!$    WRITE(*,*)
+!!$
+!!$  END SUBROUTINE NGP_2D
+!!$
+!!$  SUBROUTINE CIC_2D(x,n,L,w,d,m,all,periodic)
+!!$
+!!$    ! Cloud-in-cell binning routine
+!!$    ! NOTE: I changed this so that binning array is INOUT and could be not empty initially so could be added to
+!!$    USE array_operations
+!!$    IMPLICIT NONE
+!!$    REAL, INTENT(IN) :: x(2,n)      ! 2D particle positions
+!!$    INTEGER, INTENT(IN) :: n        ! Total number of particles in area
+!!$    REAL, INTENT(IN) :: L           ! Area side length
+!!$    REAL, INTENT(IN) :: w(n)        ! Weight array
+!!$    REAL, INTENT(INOUT) :: d(m,m)   ! Output of eventual 2D density field
+!!$    INTEGER, INTENT(IN) :: m        ! Mesh size for density field
+!!$    LOGICAL, INTENT(IN) :: all      ! Should all particles be contributing to the binning?
+!!$    LOGICAL, INTENT(IN) :: periodic ! Is the volume periodic?
+!!$    INTEGER :: i, j, k
+!!$    INTEGER :: ix(2), iy(2), ic(2)
+!!$    REAL :: dx(2), eps
+!!$    LOGICAL :: outside
+!!$    INTEGER, PARAMETER :: dim=2
+!!$
+!!$    WRITE(*,*) 'CIC_2D: Binning particles and creating density field'
+!!$    WRITE(*,*) 'CIC_2D: Binning region size:', L
+!!$    WRITE(*,*) 'CIC_2D: Cells:', m
+!!$
+!!$    ! Needs to be set to 
+!!$    eps=0.
+!!$
+    ! Set array to zero explicitly
+    !d=0.
+!!$
+!!$    DO i=1,n
+!!$
+!!$       ! Get the cell interger coordinates
+!!$       DO j=1,dim
+!!$          ix(j)=NGP_cell(x(j,i),L,m)
+!!$       END DO
+!!$
+!!$       ! Check to make sure particles are all within the binning region
+!!$       IF(all) THEN
+!!$
+!!$          ! See if particles are outside region
+!!$          outside=.FALSE.
+!!$          DO j=1,dim
+!!$             IF(ix(j)<1 .OR. ix(j)>m) outside=.TRUE.
+!!$          END DO
+!!$
+!!$          ! Write to screen if they are
+!!$          IF(outside) THEN
+!!$             DO j=1,dim
+!!$                WRITE(*,*) 'CIC_2D: Coordinate', j
+!!$                WRITE(*,*) 'CIC_2D: Position:', x(j,i)             
+!!$                WRITE(*,*) 'CIC_2D: Cell: ', ix(j)
+!!$             END DO
+!!$             STOP 'CIC_2D: Error, particle outside boundary'
+!!$          END IF
+!!$
+!!$       END IF
+!!$       
+!!$       ! dx, dy in cell units, away from cell centre
+!!$       DO j=1,dim
+!!$          dx(j)=(x(j,i)/L)*real(m)-(real(ix(j))-0.5)
+!!$       END DO
+!!$
+!!$       ! Find which other cell needs a contribution
+!!$       DO j=1,dim
+!!$          IF(dx(j)>=0.) THEN
+!!$             iy(j)=ix(j)+1
+!!$          ELSE
+!!$             iy(j)=ix(j)-1
+!!$             dx(j)=-dx(j) ! So that dx is always positive
+!!$          END IF
+!!$       END DO
+!!$
+!!$       ! Deal with periodicity
+!!$       IF(periodic) THEN
+!!$          DO j=1,dim
+!!$             IF(iy(j)==m+1) THEN
+!!$                iy(j)=1
+!!$             ELSE IF(iy(j)==0) THEN
+!!$                iy(j)=m
+!!$             END IF
+!!$          END DO
+!!$       END IF
+!!$
+!!$       ! Carry out CIC binning
+!!$       DO k=1,4
+!!$          IF(k==1) THEN
+!!$             ! Main cell
+!!$             eps=(1.-dx(1))*(1.-dx(2))
+!!$             ic(1)=ix(1)
+!!$             ic(2)=ix(2)
+!!$          ELSE IF(k==2) THEN
+!!$             ! Offset in x
+!!$             eps=dx(1)*(1.-dx(2))
+!!$             ic(1)=iy(1)
+!!$             ic(2)=ix(2)            
+!!$          ELSE IF(k==3) THEN
+!!$             ! Offset in y
+!!$             eps=(1.-dx(1))*dx(2)
+!!$             ic(1)=ix(1)
+!!$             ic(2)=iy(2)
+!!$          ELSE IF(k==4) THEN
+!!$             ! Offset in xy
+!!$             eps=dx(1)*dx(2)
+!!$             ic(1)=iy(1)
+!!$             ic(2)=iy(2)
+!!$          ELSE
+!!$             STOP 'CIC_2D: Error, something went terribly wrong'
+!!$          END IF         
+!!$          CALL add_to_array(d,m,eps*w(i),ic)
+!!$       END DO
+!!$
+!!$    END DO
+!!$
+!!$    WRITE(*,*) 'CIC_2D: Binning complete'
+!!$    WRITE(*,*)
+!!$
+!!$  END SUBROUTINE CIC_2D
 
 END PROGRAM exact1D

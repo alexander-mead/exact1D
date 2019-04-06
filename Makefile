@@ -10,6 +10,10 @@
 # Set the Fortran compiler
 FC = gfortran
 
+# FFTW library locations
+#FFTW_lib = /usr/local/lib
+#FFTW_inc = /usr/local/include
+
 # Set the Fortran flags
 FFLAGS = \
 	-Warray-bounds \
@@ -21,6 +25,12 @@ FFLAGS = \
 	-fdefault-double-8 \
 	-std=gnu \
 	-O3
+
+#-L${FFTW_lib} \
+#-I${FFTW_inc} \
+#-lfftw3 \
+#-lfftw3f \
+#-lfftw3l
 
 # Debugging flags
 DEBUG_FLAGS = \
@@ -48,7 +58,12 @@ _OBJS = \
 	random_numbers.o \
 	numerology.o \
 	file_info.o \
-	sorting.o
+	sorting.o \
+	table_integer.o
+
+#interpolate.o \
+#fft.o \
+#field_operations.o
 
 # Append prefix of the build directory to all object files
 OBJS = $(addprefix $(BUILD)/,$(_OBJS))
