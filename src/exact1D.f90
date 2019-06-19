@@ -2,7 +2,6 @@ PROGRAM exact1D
 
   USE random_numbers
   USE logical_operations
-  USE numerology
   USE array_operations
   USE sorting
   !USE field_operations
@@ -480,14 +479,14 @@ CONTAINS
     ! DO NOT swap accelerations, as these depend on position only
     v0(m)=velocity(t,v0(m),a0(m),t0(m))
     v0(m+1)=velocity(t,v0(m+1),a0(m+1),t0(m+1))
-    CALL swap_real(v0(m),v0(m+1))
+    CALL swap(v0(m),v0(m+1))
 
     ! Fix the new t0 for these sheets to be the collision time
     t0(m)=t
     t0(m+1)=t
 
     ! Swap the ID numbers so as to keep track of the ordering of sheets
-    CALL swap_int(id(m),id(m+1))
+    CALL swap(id(m),id(m+1))
 
     ! Update the collision times
     DO i=m-1,m+1
@@ -770,7 +769,7 @@ CONTAINS
 
     IF(bubble) THEN
 
-       CALL bubble_index(id,idx,n)
+       CALL index(id,idx,n,imeth=2)
        DO i=1,n
           j=idx(i)
           xn(i)=position(t,x0(j),v0(j),a0(j),t0(j))

@@ -46,24 +46,22 @@ BUILD = build
 # Source code directory
 SRC = src
 
+# Module directory
+MOD = /Users/Mead/Physics/library/src
+
 # Executable
 EXEC = exact1D
 
 # Object files
 _OBJS = \
 	constants.o \
-	logical_operations.o \
 	fix_polynomial.o \
 	array_operations.o \
+	logical_operations.o \
 	random_numbers.o \
-	numerology.o \
 	file_info.o \
 	sorting.o \
 	table_integer.o
-
-#interpolate.o \
-#fft.o \
-#field_operations.o
 
 # Append prefix of the build directory to all object files
 OBJS = $(addprefix $(BUILD)/,$(_OBJS))
@@ -78,7 +76,7 @@ debug: FFLAGS += $(DEBUG_FLAGS)
 debug: $(EXEC)
 
 # Rule to create the objects
-$(BUILD)/%.o: $(SRC)/%.f90
+$(BUILD)/%.o: $(MOD)/%.f90
 	$(FC) -c -o $@ $< -J$(BUILD) $(LDFLAGS) $(FFLAGS)
 
 # Clean command
